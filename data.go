@@ -23,8 +23,17 @@ type DemuxerData struct {
 	PES         *PESData
 	PID         uint16
 	PMT         *PMTData
-	SDT         *SDTData
-	TOT         *TOTData
+	// ProgramMapEvent is set when consuming this PAT/PMT data revealed a change
+	// in the program mapping (a newly complete, changed table version). It is
+	// nil for retransmissions of an already committed version and for the first
+	// version observed, which only establishes the baseline.
+	ProgramMapEvent *ProgramMapEvent
+	SDT             *SDTData
+	// Section is the PSI section this data was parsed from. It is nil for PES
+	// data and provides the version/section metadata of PAT, PMT and other PSI
+	// tables.
+	Section *PSISection
+	TOT     *TOTData
 }
 
 // MuxerData represents a data to be written by Muxer

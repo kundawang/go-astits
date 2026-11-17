@@ -272,12 +272,12 @@ func TestParsePSISectionSyntaxHeader(t *testing.T) {
 func TestPSIToData(t *testing.T) {
 	p := &Packet{}
 	assert.Equal(t, []*DemuxerData{
-		{EIT: eit, FirstPacket: p, PID: 2},
-		{FirstPacket: p, NIT: nit, PID: 2},
-		{FirstPacket: p, PAT: pat, PID: 2},
-		{FirstPacket: p, PMT: pmt, PID: 2},
-		{FirstPacket: p, SDT: sdt, PID: 2},
-		{FirstPacket: p, TOT: tot, PID: 2},
+		{EIT: eit, FirstPacket: p, PID: 2, Section: psi.Sections[0]},
+		{FirstPacket: p, NIT: nit, PID: 2, Section: psi.Sections[1]},
+		{FirstPacket: p, PAT: pat, PID: 2, Section: psi.Sections[2]},
+		{FirstPacket: p, PMT: pmt, PID: 2, Section: psi.Sections[3]},
+		{FirstPacket: p, SDT: sdt, PID: 2, Section: psi.Sections[4]},
+		{FirstPacket: p, TOT: tot, PID: 2, Section: psi.Sections[5]},
 	}, psi.toData(p, uint16(2)))
 }
 

@@ -85,6 +85,15 @@ func newPacketPool(programMap *programMap) *packetPool {
 	}
 }
 
+// resetUnlocked drops every queued packet for a PID. It is called when parsing
+// the payload of that PID failed: the corrupt payload must not be merged with
+// the following table once the next payload unit starts.
+func (b *packetPool) resetUnlocked(pid uint16) {
+	if acc, ok := b.b[uint32(pid)]; ok {
+		acc.q = nil
+	}
+}
+
 // addUnlocked adds a new packet to the pool
 func (b *packetPool) addUnlocked(p *Packet) (ps []*Packet) {
 	// Throw away packet if error indicator

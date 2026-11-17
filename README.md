@@ -83,8 +83,35 @@ for {
 }
 ```
 
-## Mux
+## Program map change events
 
+When the broadcaster updates the PAT or the PMT (for instance when the director
+switches the audio track), the demuxer reassembles the new, possibly
+multi-section, table and emits a `ProgramMapEvent` once the table is complete.
+Each event lists the PIDs that were added, removed or whose stream type
+changed, along with the previous and new table version numbers and the packet
+that triggered the change. The first version of a table only establishes a
+baseline and does not emit an event; retransmissions of an already committed
+version are ignored, version numbers wrap from 31 to 0, and PID reuse is
+reported explicitly.
+
+```go
+d, _ := dmx.NextData()
+if d.ProgramMapEvent != nil {
+    e := d.ProgramMapEvent
+    fmt.Printf("%s v%d -> v%d (program %d)\n", e.TableType, e.PreviousVersion, e.Version, e.ProgramNumber)
+    for _, c := range e.Changes {
+        fmt.Printf("  PID %d: %s\n", c.PID, c.Kind)
+    }
+}
+```
+
+Tables are only committed once every section (`0` to `last_section_number`)
+has been received, so a missing section keeps the previous version active
+until a valid retransmission completes the table. Sections failing the CRC32
+check or carrying conflicting version numbers are rejected and never committed.
+
+## Mux
 ```go
 // Create a cancellable context in case you want to stop writing packets/data any time you want
 ctx, cancel := context.WithCancel(context.Background())

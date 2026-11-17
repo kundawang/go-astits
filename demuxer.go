@@ -31,11 +31,12 @@ type Demuxer struct {
 	optPacketsParser PacketsParser
 	optPacketSkipper PacketSkipper
 
-	packetBuffer *packetBuffer
-	packetPool   *packetPool
-	programMap   *programMap
-	r            io.Reader
-	streamMap    *elementaryStreamMap
+	packetBuffer      *packetBuffer
+	packetPool        *packetPool
+	programMap        *programMap
+	programMapMonitor *programMapMonitor
+	r                 io.Reader
+	streamMap         *elementaryStreamMap
 }
 
 // PacketsParser represents an object capable of parsing a set of packets containing a unique payload spanning over those packets
@@ -50,11 +51,12 @@ type PacketSkipper func(p *Packet) (skip bool)
 func NewDemuxer(ctx context.Context, r io.Reader, opts ...func(*Demuxer)) (d *Demuxer) {
 	// Init
 	d = &Demuxer{
-		ctx:        ctx,
-		l:          astikit.AdaptStdLogger(nil),
-		programMap: newProgramMap(),
-		r:          r,
-		streamMap:  newElementaryStreamMap(),
+		ctx:               ctx,
+		l:                 astikit.AdaptStdLogger(nil),
+		programMap:        newProgramMap(),
+		programMapMonitor: newProgramMapMonitor(),
+		r:                 r,
+		streamMap:         newElementaryStreamMap(),
 	}
 	d.packetPool = newPacketPool(d.programMap)
 
@@ -173,6 +175,9 @@ func (dmx *Demuxer) NextData() (d *DemuxerData, err error) {
 
 		// Parse data
 		if ds, err = parseData(ps, dmx.optPacketsParser, dmx.programMap, dmx.streamMap); err != nil {
+			// Drop the corrupt payload so it cannot contaminate the next
+			// payload unit on the same PID.
+			dmx.packetPool.resetUnlocked(ps[0].Header.PID)
 			err = fmt.Errorf("astits: building new data failed: %w", err)
 			return
 		}
@@ -191,7 +196,7 @@ func (dmx *Demuxer) updateData(ds []*DemuxerData) (d *DemuxerData) {
 		d = ds[0]
 		dmx.dataBuffer = append(dmx.dataBuffer, ds[1:]...)
 
-		// Update program map
+		// Update program map and feed the program map monitor
 		for _, v := range ds {
 			if v.PAT != nil {
 				for _, pgm := range v.PAT.Programs {
@@ -206,6 +211,23 @@ func (dmx *Demuxer) updateData(ds []*DemuxerData) (d *DemuxerData) {
 					dmx.streamMap.setUnlocked(es.ElementaryPID, v.PMT.ProgramNumber)
 				}
 			}
+
+			// Reassemble multi-section PAT/PMT tables and emit an event once a
+			// complete new version changes the program mapping.
+			events, err := dmx.programMapMonitor.handleSection(v)
+			if err != nil {
+				// A version conflict or a malformed section number does not
+				// interrupt the stream: log it and keep waiting for a valid table.
+				dmx.l.Error(fmt.Errorf("astits: monitoring program map failed: %w", err))
+				continue
+			}
+			for _, e := range events {
+				dmx.dataBuffer = append(dmx.dataBuffer, &DemuxerData{
+					FirstPacket:     e.FirstPacket,
+					PID:             e.PID,
+					ProgramMapEvent: e,
+				})
+			}
 		}
 	}
 	return
@@ -216,6 +238,9 @@ func (dmx *Demuxer) Rewind() (n int64, err error) {
 	dmx.dataBuffer = []*DemuxerData{}
 	dmx.packetBuffer = nil
 	dmx.packetPool = newPacketPool(dmx.programMap)
+	// The stream is re-read from its start, reset the table reassembly state so
+	// the first PAT/PMT versions establish a fresh baseline.
+	dmx.programMapMonitor = newProgramMapMonitor()
 	if n, err = rewind(dmx.r); err != nil {
 		err = fmt.Errorf("astits: rewinding reader failed: %w", err)
 		return
